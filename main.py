@@ -5,6 +5,7 @@ from ludusavi import Ludusavi
 import logging
 from pathlib import Path
 from savehaven_service import Service
+from live_backend import LiveService
 
 decky.logger.setLevel("INFO")
 
@@ -31,15 +32,30 @@ class Plugin:
 
     async def get_game_config(self, key: str):
         decky.logger.debug("Executing: get_game_config('%s')", key)
-        return config.game_config.getSetting(key)
+        value = config.game_config.getSetting(key)
+        if value is None and hasattr(self.service.automation, 'submit'):
+            value = {'name': key, 'alias': key, 'autoSync': key not in self.service.automation.settings['excluded']}
+        return value
 
     async def set_game_config(self, key: str, value):
         decky.logger.debug("Executing: set_game_config('%s', '%s')", key, value)
         config.game_config.setSetting(key, value)
+        backend = self.service.automation
+        if hasattr(backend, 'submit'):
+            with backend.lock:
+                excluded = set(backend.settings['excluded'])
+                if value.get('autoSync'): excluded.discard(key)
+                else: excluded.add(key)
+                backend.settings['excluded'] = sorted(excluded)
+                backend.settings.setdefault('gameAliases', {})[key] = value.get('alias', key)
+                backend.persist()
 
     async def backup_game(self, game_name: str):
         decky.logger.debug("Executing: backup_game('%s')", game_name)
-        asyncio.create_task(self.ludusavi.backup_game_async(game_name))
+        if hasattr(self.service.automation, 'submit'):
+            asyncio.create_task(self._live_event({'action':'backup','games':[game_name]}, 'backup_game_complete'))
+        else:
+            asyncio.create_task(self.ludusavi.backup_game_async(game_name))
 
     async def get_normalized_game_name(self, game_name: str):
         decky.logger.debug("Executing: get_normalized_game_name('%s')", game_name)
@@ -55,6 +71,9 @@ class Plugin:
             preview,
             api_mode,
         )
+        if hasattr(self.service.automation, 'submit'):
+            asyncio.create_task(self._live_event({'action':'restore-preview' if preview else 'restore','games':[game_name],'backup':backup_id}, 'restore_game_complete', api_mode))
+            return
         asyncio.create_task(
             self.ludusavi.restore_game_async(game_name, backup_id, preview, api_mode)
         )
@@ -75,8 +94,18 @@ class Plugin:
             )
         )
 
+    async def _live_event(self, data, event, api_mode=True):
+        import json
+        try:
+            result = await asyncio.to_thread(self.service.automation.execute, data)
+            await decky.emit(event, result if api_mode else json.dumps(result, indent=2))
+        except Exception as exc:
+            await decky.emit(event, {'errors': {'pluginError': str(exc)}})
+
     async def get_game_backups(self, game_name: str):
         decky.logger.debug("Executing: get_game_backups('%s')", game_name)
+        if hasattr(self.service.automation, 'submit'):
+            return await asyncio.to_thread(self.service.automation.execute, {'action':'backups','games':[game_name]})
         return await self.ludusavi.get_game_backups(game_name)
 
     async def get_plugin_logs(self):
@@ -107,10 +136,14 @@ class Plugin:
 
     # Asyncio-compatible long-running code, executed in a task when the plugin is loaded
     async def savehaven_event(self, app_id: str, event: str, name: str = ""):
-        return self.service.automation.hook({"appId": app_id, "event": event, "name": name})
+        return await asyncio.to_thread(self.service.automation.hook, {"appId": app_id, "event": event, "name": name})
 
     async def savehaven_action(self, data: dict):
-        return await asyncio.to_thread(self.service.automation.action, data)
+        backend = self.service.automation
+        return await asyncio.to_thread(backend.submit if hasattr(backend, 'submit') else backend.action, data)
+
+    async def savehaven_live(self, data: dict):
+        return await asyncio.to_thread(self.service.automation.submit, data)
 
     async def savehaven_files(self):
         return await asyncio.to_thread(self.service.sandbox.listing)
@@ -127,10 +160,16 @@ class Plugin:
     async def _main(self):
         root = Path(decky.DECKY_USER_HOME) / "SaveDemo"
         web = Path(decky.DECKY_PLUGIN_DIR) / "web"
-        self.service = await asyncio.to_thread(Service, root, web, 8765)
+        marker = Path(decky.DECKY_USER_HOME) / 'Saves' / '.savehaven.json'
+        import json
+        live = marker.is_file() and json.loads(marker.read_text()).get('kind') == 'savehaven-live'
+        if live:
+            self.service = await asyncio.to_thread(LiveService, Path(decky.DECKY_USER_HOME), web, 8765)
+        else:
+            self.service = await asyncio.to_thread(Service, root, web, 8765)
         self.ludusavi = self.service.automation.adapter
         self.service.start()
-        decky.logger.info("Savehaven hooks ready; web UI at http://127.0.0.1:8765 (sandbox)")
+        decky.logger.info("Savehaven hooks ready; web UI at http://127.0.0.1:8765 ")
 
     async def _unload(self):
         if hasattr(self, "service"):

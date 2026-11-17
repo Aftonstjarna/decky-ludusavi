@@ -169,7 +169,7 @@ const BackupsDropdown: FC<{ game: GameInfo; backups?: LudusaviBackupItem[]; onSe
     setDiff(undefined);
 
     if (selectedBackup) {
-      restorePreview(game.alias, selectedBackup).then((l) => setDiff(l));
+      restorePreview(game.alias, selectedBackup).then((l) => setDiff(l)).catch((e) => { setDiff(undefined); toaster.toast({ title: "Restore preview failed", body: String(e) }); });
     }
   }, [selectedBackup, game.alias]);
 

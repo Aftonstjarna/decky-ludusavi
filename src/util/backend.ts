@@ -52,7 +52,8 @@ const asyncHandler = <TResult>(func: () => Promise<void>, event: string) => {
   return new Promise<TResult>((resolve, reject) => {
     const listener = (r: TResult) => {
       removeEventListener(event, listener);
-      resolve(r);
+      if (r && typeof r === "object" && "errors" in r && r.errors) reject(new Error(JSON.stringify(r.errors)));
+      else resolve(r);
     };
 
     addEventListener(event, listener);

@@ -1,6 +1,6 @@
 {
   "name": "savehaven-decky-ludusavi",
-  "version": "1.2.2-savehaven.1",
+  "version": "1.2.2-savehaven.2",
   "description": "Savehaven fork: game-exit hooks and web-based managed saves.",
   "type": "module",
   "scripts": {

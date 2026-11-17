@@ -16,6 +16,7 @@ class Ludusavi:
 
     def __init__(self, bin_paths: list[str], config_dir: str | None = None):
         self.bin_path = None
+        self._active_pids = set()
         self.config_dir = config_dir
         self._set_env()
 
@@ -122,17 +123,20 @@ class Ludusavi:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+            self._active_pids.add(process.pid)
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45)
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=getattr(self, "timeout", 45))
             except asyncio.TimeoutError:
                 process.kill()
                 await process.communicate()
                 raise RuntimeError("Ludusavi timed out")
+            finally:
+                self._active_pids.discard(process.pid)
             if process.returncode:
                 raise RuntimeError(f"Ludusavi exited {process.returncode}: {stderr.decode(errors='replace')[-1000:]}")
 
             result_str = stdout.decode()
-            decky.logger.info(result_str)
+            decky.logger.debug(result_str)
 
             if api_mode:
                 result_str = json.loads(result_str)

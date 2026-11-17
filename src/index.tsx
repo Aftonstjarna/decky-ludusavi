@@ -3,9 +3,10 @@ import { PanelSection, PanelSectionRow, ButtonItem, Dropdown, DialogButton, Focu
 import { FC, useEffect, useState } from "react";
 import { LuDatabaseBackup } from "react-icons/lu";
 import { FaDownload, FaUpload } from "react-icons/fa";
+import { LivePanel } from "./LivePanel";
 import { registerDependencies } from "./util/registrations";
 type Entry = { id: string; name: string; platform: string; decision: string; reason: string; override: string; appId: string };
-type Status = { enabled: boolean; queued: number; scanCount: number; version: string; entries: Entry[] };
+type Status = { live?: boolean; enabled: boolean; queued: number; scanCount: number; version: string; entries: Entry[] };
 type Save = { id: string; revision: string; backups: string[] };
 const Restore: FC<{game: Entry; closeModal?: () => void}> = ({game, closeModal}) => {
   const [save,setSave]=useState<Save>();
@@ -26,10 +27,11 @@ const Content: FC = () => {
   const [selected,setSelected]=useState<string>();
   const [message,setMessage]=useState("Connecting to backend…");
   const [busy,setBusy]=useState(false);
-  const refresh=async()=>{try{const s=await call<[],Status>("savehaven_status");setStatus(s);setSelected(id=>id||s.entries[0]?.id);setMessage(`${s.queued} queued · ${s.scanCount} scans this session`);}catch(e){setMessage(String(e));}};
+  const refresh=async()=>{try{const s=await call<[],Status>("savehaven_status");setStatus(s);setSelected(id=>id||s.entries?.[0]?.id);setMessage(`${s.queued} queued · ${s.scanCount} scans this session`);}catch(e){setMessage(String(e));}};
   useEffect(()=>{refresh();},[]);
   const action=async(data:object)=>{setBusy(true);try{const s=await call<[object],Status>("savehaven_action",data);setStatus(s);setMessage(`${s.queued} queued · ${s.scanCount} scans this session`);}catch(e){setMessage(String(e));}finally{setBusy(false);}};
-  const game=status?.entries.find(e=>e.id===selected);
+  const game=status?.entries?.find(e=>e.id===selected);
+  if (status?.live) return <LivePanel />;
   return <>
     <PanelSection><PanelSectionRow><Dropdown rgOptions={(status?.entries||[]).map(e=>({label:e.name,data:e.id}))} selectedOption={selected} onChange={e=>setSelected(e.data)} /></PanelSectionRow>
       {game&&<PanelSectionRow><Focusable flow-children="horizontal" style={{display:"flex",gap:"0.5em"}}>

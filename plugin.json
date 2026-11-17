@@ -10,7 +10,7 @@
       "cloud",
       "sync"
     ],
-    "description": "Hook-driven save management with a local web UI. Development build restricted to SaveDemo.",
+    "description": "Ludusavi with game-exit hooks, save centralization, Syncthing status and a plugin-owned local web UI.",
     "image": "https://github.com/GedasFX/decky-ludusavi/raw/main/assets/thumbnail.png"
   }
 }
