@@ -2,7 +2,10 @@ import asyncio
 import os
 import subprocess
 import json
-import decky  # type: ignore
+try:
+    import decky  # type: ignore
+except ImportError:
+    from savehaven_runtime import decky
 
 
 class Ludusavi:
@@ -11,14 +14,19 @@ class Ludusavi:
 
     _env: dict[str, str]
 
-    def __init__(self, bin_paths: list[str]):
+    def __init__(self, bin_paths: list[str], config_dir: str | None = None):
+        self.bin_path = None
+        self.config_dir = config_dir
         self._set_env()
 
         for path in bin_paths:
-            if self._try_initialize(*path.split(" ")):
+            if self._try_initialize(*(path if isinstance(path, list) else __import__("shlex").split(path))):
                 break
 
         decky.logger.info("Using Binary: %s", self.bin_path)
+
+    async def preview_saves(self):
+        return await self._run_command(["backup", "--preview", "--no-cloud-sync"])
 
     async def backup_game_async(self, game_name: str):
         return await self._run_command(
@@ -101,7 +109,7 @@ class Ludusavi:
         if not self.bin_path:
             raise Exception("Ludusavi binary not found")
 
-        cmd = [*self.bin_path, *cmd]
+        cmd = [*self.bin_path, *(["--config", self.config_dir, "--no-manifest-update"] if self.config_dir else []), *cmd]
         if api_mode:
             cmd.append("--api")
 
@@ -112,16 +120,22 @@ class Ludusavi:
                 *cmd,
                 env=self._env,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+                stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await process.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.communicate()
+                raise RuntimeError("Ludusavi timed out")
+            if process.returncode:
+                raise RuntimeError(f"Ludusavi exited {process.returncode}: {stderr.decode(errors='replace')[-1000:]}")
 
             result_str = stdout.decode()
             decky.logger.info(result_str)
 
             if api_mode:
-                json_end = result_str.rindex("}") + 1
-                result_str = json.loads(result_str[:json_end])
+                result_str = json.loads(result_str)
 
             if event:
                 await decky.emit(event, result_str)
@@ -139,11 +153,11 @@ class Ludusavi:
         self._env = os.environ.copy()
 
         if "XDG_RUNTIME_DIR" not in self._env:
-            self._env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+            self._env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
         if "LD_LIBRARY_PATH" in self._env:
             del self._env["LD_LIBRARY_PATH"]
 
-        decky.logger.debug("Using Environment: %s", self._env)
+        decky.logger.debug("Prepared Ludusavi process environment")
 
     def _try_initialize(self, *bin_path: str) -> bool:
         try:
@@ -153,6 +167,7 @@ class Ludusavi:
                 env=self._env,
                 stderr=subprocess.STDOUT,
                 text=True,
+                timeout=10,
             )
 
             decky.logger.debug("Command Output: %s", output)
@@ -161,7 +176,7 @@ class Ludusavi:
             self.version = output
 
             return True
-        except FileNotFoundError as e:
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
             decky.logger.error(e)
         except subprocess.CalledProcessError as e:
             decky.logger.error(e)

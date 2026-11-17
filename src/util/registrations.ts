@@ -8,9 +8,9 @@ const registrations: Unregisterable[] = [];
 function registerAppLifecycleNotifications() {
     registrations.push(SteamClient.GameSessions.RegisterForAppLifetimeNotifications(async (e: AppLifetimeNotification) => {
         if (e.bRunning) {
-            onGameStart(e.unAppID);
+            await onGameStart(e.unAppID);
         } else {
-            onGameExit(e.unAppID);
+            await onGameExit(e.unAppID);
         }
     }));
 }

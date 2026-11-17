@@ -3,6 +3,8 @@ import config
 import decky  # type: ignore
 from ludusavi import Ludusavi
 import logging
+from pathlib import Path
+from savehaven_service import Service
 
 decky.logger.setLevel("INFO")
 
@@ -104,14 +106,23 @@ class Plugin:
         decky.logger.log(level_map.get(level.lower(), logging.INFO), message)
 
     # Asyncio-compatible long-running code, executed in a task when the plugin is loaded
-    async def _main(self):
-        self.ludusavi = Ludusavi(
-            ["flatpak run com.github.mtkennerly.ludusavi", "ludusavi", "ludusavi.exe"]
-        )
+    async def savehaven_event(self, app_id: str, event: str, name: str = ""):
+        return self.service.automation.hook({"appId": app_id, "event": event, "name": name})
 
-    # Function called first during the unload process, utilize this to handle your plugin being removed
+    async def savehaven_status(self):
+        return await asyncio.to_thread(self.service.automation.status)
+
+    async def _main(self):
+        root = Path(decky.DECKY_USER_HOME) / "SaveDemo"
+        web = Path(decky.DECKY_PLUGIN_DIR) / "web"
+        self.service = await asyncio.to_thread(Service, root, web, 8765)
+        self.ludusavi = self.service.automation.adapter
+        self.service.start()
+        decky.logger.info("Savehaven hooks ready; web UI at http://127.0.0.1:8765 (sandbox)")
+
     async def _unload(self):
-        pass
+        if hasattr(self, "service"):
+            await asyncio.to_thread(self.service.close)
 
     # Migrations that should be performed before entering `_main()`.
     async def _migration(self):

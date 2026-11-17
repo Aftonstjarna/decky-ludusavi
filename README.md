@@ -1,3 +1,13 @@
+# Savehaven fork of Decky Ludusavi
+
+Development branch based on GedasFX/decky-ludusavi. Keeps the upstream Steam game lifecycle hooks and Ludusavi command adapter; adds a queued backend and dark-blue web interface for managed saves.
+
+**Current build is sandbox-only.** No periodic save scans. Start/exit hooks drive per-installation jobs. See [Savehaven setup and behavior](docs/SAVEHAVEN.md).
+
+Original upstream documentation follows below. Its cloud-provider descriptions do not describe this fork's sandbox mirroring implementation.
+
+---
+
 # Decky - Ludusavi
 
 This plugin is a Decky adapter for the [Ludusavi](https://github.com/mtkennerly/ludusavi) project. For more information on how to use that tool, visit their GitHub page.
