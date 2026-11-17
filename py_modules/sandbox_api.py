@@ -102,7 +102,7 @@ class Sandbox:
                 if len(data) > MAX_SIZE:
                     raise ValueError('File exceeds 64 KiB')
                 json.loads(content)
-            elif action == 'restore':
+            elif action in ('restore', 'preview'):
                 name = request.get('backup')
                 if not isinstance(name, str) or Path(name).name != name or not name.endswith('.json'):
                     raise ValueError('Invalid backup name')
@@ -110,6 +110,8 @@ class Sandbox:
                 json.loads(data)
             else:
                 raise ValueError('Unknown action')
+            if action == 'preview':
+                return {'current':current.decode('utf-8'),'backup':data.decode('utf-8'),'changed':current!=data}
             backup = self.snapshot(game, current)
             self.replace(path, data)
             return {'message': 'Save updated' if action == 'save' else 'Backup restored', 'previousVersion': backup}

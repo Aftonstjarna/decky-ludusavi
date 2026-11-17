@@ -81,7 +81,8 @@ class Automation:
         self.root = sandbox.root
         self.sources = self.root.parent / (self.root.name + 'Sources')
         self.mirror = self.root.parent / (self.root.name + 'Mirror')
-        self.binary = binary or shutil.which('ludusavi') or '/var/lib/flatpak/app/com.github.mtkennerly.ludusavi/current/active/files/bin/ludusavi'
+        preferred = Path(os.environ.get('DECKY_USER_HOME', str(Path.home()))) / 'Games/Tools/ludusavi'
+        self.binary = binary or (str(preferred) if preferred.is_file() else None) or shutil.which('ludusavi') or '/var/lib/flatpak/app/com.github.mtkennerly.ludusavi/current/active/files/bin/ludusavi'
         self.lock = sandbox.lock
         self.stop = threading.Event()
         self.thread = None
@@ -123,6 +124,7 @@ class Automation:
         state = self.sandbox.safe('.automation.json')
         self.settings = json.loads(state.read_text()) if state.exists() else {'enabled': True, 'overrides': {}, 'coverage': {}, 'migrations': {}}
         self.settings.setdefault('steamAppIds', {})
+        self.settings.setdefault('platforms', {})
         self.settings['triggerMode']='game-exit-hooks'
         for ident in SAMPLES:
             source = self.sources / ident / 'saves'
@@ -139,10 +141,10 @@ class Automation:
         for ident, sample in SAMPLES.items():
             entries.append({'id':ident,**sample,'curated':False,'source':self.sources/ident/'saves','destination':self.root/'Managed'/ident})
         for ident,name in GAMES.items():
-            entries.append({'id':ident,'name':name,'platform':'Curated','cloud':'none','curated':True,'source':self.root/name,'destination':self.root/name})
+            entries.append({'id':ident,'name':name,'platform':{'ds3':'Steam','arx':'GOG','jak':'Non-Steam'}[ident],'cloud':'none','curated':True,'source':self.root/name,'destination':self.root/name})
         return entries
 
-    def location(self, e):
+    def location(self, e, recover=True):
         if e['curated']:
             return self.sandbox.safe(e['destination'].relative_to(self.root))
         src,dst=e['source'],e['destination']
@@ -153,6 +155,7 @@ class Automation:
                 raise ValueError('Original link differs from the recorded destination')
             return dst
         if not src.exists() and dst.exists() and e['id'] in self.settings['migrations']:
+            if not recover:return dst
             # Resume a recorded move interrupted before the link was created.
             src.symlink_to(dst, target_is_directory=True)
             self.settings['migrations'][e['id']]['phase']='linked'
@@ -165,8 +168,8 @@ class Automation:
         config_dir.mkdir(exist_ok=True)
         custom=[]
         for e in entries:
-            self.location(e)
-            custom.append({'name':e['name'],'files':[str(e['source'])]})
+            location=self.location(e,recover=False)
+            custom.append({'name':e['name'],'files':[str(location)]})
         config={'manifest':{'enable':False},'roots':[],'release':{'check':False},'cloud':{'synchronize':False},'backup':{'path':str(self.root/'.ludusavi-backups')},'customGames':custom}
         self.sandbox.replace(self.sandbox.safe('.ludusavi-demo/config.yaml'),json.dumps(config).encode())
         return asyncio.run(self.adapter.preview_saves()).get('games',{})
@@ -250,13 +253,13 @@ class Automation:
         coverage=self.settings['coverage'].get(e['id'],e['cloud'])
         override=self.settings['overrides'].get(e['id'],'auto')
         status,reason=decide(e,override,coverage)
-        return {**{k:v for k,v in e.items() if k not in ('source','destination')},'source':str(e['source']),'destination':str(e['destination']),'cloud':coverage,'override':override,'decision':status,'reason':reason,'state':'Waiting for game exit' if status=='Included' else status,'linked':e['source'].is_symlink(),'appId':self.settings.get('steamAppIds',{}).get(e['id'],'')}
+        return {**{k:v for k,v in e.items() if k not in ('source','destination')},'source':str(e['source']),'destination':str(e['destination']),'cloud':coverage,'override':override,'decision':status,'reason':reason,'state':'Waiting for game exit' if status=='Included' else status,'linked':e['source'].is_symlink(),'appId':self.settings.get('steamAppIds',{}).get(e['id'],''),'platform':self.settings.get('platforms',{}).get(e['id'],e['platform'])}
 
     def cached_row(self,e):
         base=self.row(e)
         cached=next((r for r in self.rows if r['id']==e['id']),None)
         if cached and cached['decision']==base['decision']:
-            base.update({k:cached[k] for k in ('state','detectedFiles','error') if k in cached})
+            base.update({k:cached[k] for k in ('state','detectedFiles','bytes','error') if k in cached})
         return base
 
     def mirror_entry(self,e):
@@ -280,9 +283,24 @@ class Automation:
             raise
         self.last_mirror=datetime.now(timezone.utc).isoformat()
 
+    def preview(self):
+        with self.lock:
+            self.sandbox.validate()
+            eligible=[e for e in self.entries() if self.row(e)['decision']=='Included']
+            found=self.scan_ludusavi(eligible) if eligible else {}
+            self.scan_count+=bool(eligible)
+            self.rows=[]
+            for e in self.entries():
+                row=self.row(e)
+                files=found.get(e['name'],{}).get('files',{})
+                if row['decision']=='Included':
+                    row.update(state='Previewed' if files else 'No saves detected',detectedFiles=len(files),bytes=sum(f.get('bytes',0) for f in files.values()))
+                self.rows.append(row)
+            return self.status()
+
     def status(self):
         with self.lock,self.queue_lock:
-            return {'enabled':self.settings['enabled'],'mode':'game-exit-hooks','engine':'Forked Decky Ludusavi backend · sandbox entries','root':str(self.root),'sources':str(self.sources),'mirror':str(self.mirror),'lastScan':self.last_scan,'lastMirror':self.last_mirror,'error':self.error,'entries':[self.cached_row(e) for e in self.entries()],'token':self.sandbox.token,'queued':len(self.pending),'activeJob':self.active_job,'scanCount':self.scan_count,'recentEvents':self.events[-15:],'unmappedApps':self.unmapped,'hookEndpoint':'/api/hooks','runningIds':sorted(self.running_ids())}
+            return {'enabled':self.settings['enabled'],'mode':'game-exit-hooks','engine':'Forked Decky Ludusavi backend · sandbox entries','root':str(self.root),'sources':str(self.sources),'mirror':str(self.mirror),'lastScan':self.last_scan,'lastMirror':self.last_mirror,'error':self.error,'entries':[self.cached_row(e) for e in self.entries()],'token':self.sandbox.token,'queued':len(self.pending),'activeJob':self.active_job,'scanCount':self.scan_count,'recentEvents':self.events[-15:],'unmappedApps':self.unmapped,'hookEndpoint':'/api/hooks','runningIds':sorted(self.running_ids()),'binary':self.adapter.bin_path,'version':self.adapter.version.strip()}
 
     def enqueue(self,ids,reason='game-exit',force=False):
         with self.queue_lock:
@@ -323,6 +341,10 @@ class Automation:
                     if key in data:
                         if data[key] not in allowed:raise ValueError('Invalid rule')
                         self.settings[store][ident]=data[key]
+                if 'platform' in data:
+                    value=data['platform']
+                    if not isinstance(value,str) or not value.strip() or len(value)>80:raise ValueError('Invalid platform')
+                    self.settings['platforms'][ident]=value.strip()
                 if 'appId' in data:
                     appid=str(data['appId']).strip()
                     if appid and (not appid.isdecimal() or len(appid)>12):raise ValueError('Invalid Steam app ID')
@@ -342,7 +364,15 @@ class Automation:
                     if target.is_symlink() or (target.exists() and target.stat().st_nlink!=1):raise ValueError('Unsafe save')
                     current=json.loads(target.read_text());current['level']=int(current.get('level',0))+1
                     self.sandbox.replace(e['source']/'save.json',json.dumps(current,indent=2).encode())
-            elif action=='scan':self.enqueue([e['id'] for e in self.entries()],'manual',True)
+            elif action=='preview':return self.preview()
+            elif action=='scan':
+                ids=data.get('ids',[e['id'] for e in self.entries()])
+                known={e['id'] for e in self.entries()}
+                if not isinstance(ids,list) or not all(isinstance(i,str) and i in known for i in ids):raise ValueError('Invalid game selection')
+                for e in self.entries():
+                    if e['id'] in ids and e['curated'] and self.row(e)['decision']=='Included' and e['id'] not in self.running_ids():
+                        self.sandbox.snapshot(e['id'],self.sandbox.read(self.sandbox.file(e['id'])))
+                self.enqueue(ids,'manual',True)
             else:raise ValueError('Unknown action')
         return self.status()
 

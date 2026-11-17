@@ -65,3 +65,11 @@ The test suite covers actual sandbox Ludusavi previews, migration and link recov
 ## Remaining production work
 
 Live installation discovery and verified per-installation Steam Cloud coverage, production path enrollment, cross-filesystem migration, Syncthing integration, and production retention settings are not enabled. The sandbox uses directory symlinks; it does not use fragile individual-file hard links. Mirroring is local and does not protect against loss of the computer. Existing historical backups remain available even after an installation is excluded.
+
+### Interfaces and native binary
+
+The web UI follows Ludusavi's Backup mode, Restore mode, Custom games, and Other tabs in a dark-blue theme. Preview detects eligible sandbox saves without moving, linking, or mirroring them. Backup operates on selected games. Restore supports the three curated sample JSON saves, includes a preview and revision check, and preserves the previous contents. Platform labels are editable per installation.
+
+The Decky panel uses the parent plugin's game picker, Backup/Restore buttons, Game Config and Global Config sections. Backup rules allow explicit per-copy exceptions. Idle panels do not scan.
+
+The backend prefers `~/Games/Tools/ludusavi` (using Decky's user home when available), then falls back to the existing binary candidates. The Other tab shows the binary and version actually used.

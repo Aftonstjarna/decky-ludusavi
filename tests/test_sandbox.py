@@ -23,6 +23,13 @@ class FileManagerTests(unittest.TestCase):
         self.store.action(self.request('restore',backup=result['previousVersion']))
         self.assertEqual(json.loads(self.store.file('ds3').read_text()),{'level':1})
         self.assertEqual(len(self.store.listing()['files'][0]['backups']),2)
+    def test_restore_preview_does_not_write(self):
+        result=self.store.action(self.request('save',content='{"level":2}'))
+        before=self.store.listing()
+        preview=self.store.action(self.request('preview',backup=result['previousVersion']))
+        self.assertEqual(json.loads(preview['backup']),{'level':1})
+        self.assertTrue(preview['changed'])
+        self.assertEqual(before,self.store.listing())
     def test_stale_edit(self):
         r=self.request('save',content='{}');self.store.file('ds3').write_text('{"level":3}')
         with self.assertRaises(ValueError):self.store.action(r)

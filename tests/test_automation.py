@@ -20,6 +20,23 @@ class AutomationTests(unittest.TestCase):
     def run_cycles(self):
         self.auto.cycle();self.assertIsNone(self.auto.error)
         self.auto.cycle();self.assertIsNone(self.auto.error)
+    def test_preview_never_moves_or_mirrors(self):
+        result=self.auto.action({'action':'preview'})
+        self.assertFalse((self.auto.sources/'port/saves').is_symlink())
+        self.assertFalse((self.root/'Managed/port').exists())
+        self.assertFalse((self.auto.mirror/'current/Managed/port').exists())
+        rows={e['id']:e for e in result['entries']}
+        self.assertGreater(rows['port']['detectedFiles'],0)
+        self.assertEqual(rows['cloud']['decision'],'Excluded')
+        self.assertEqual(result['scanCount'],1)
+    def test_platform_persists(self):
+        self.auto.action({'action':'rule','id':'port','platform':'Non-Steam'})
+        self.assertEqual(next(e for e in self.auto.status()['entries'] if e['id']=='port')['platform'],'Non-Steam')
+        self.assertEqual(json.loads((self.root/'.automation.json').read_text())['platforms']['port'],'Non-Steam')
+    def test_selected_backup_only(self):
+        self.auto.action({'action':'scan','ids':['port']});self.auto.jobs.join()
+        self.assertTrue((self.auto.sources/'port/saves').is_symlink())
+        self.assertFalse((self.auto.sources/'gog/saves').is_symlink())
     def test_ludusavi_detection_filter_link_and_mirror(self):
         self.run_cycles()
         self.assertTrue((self.auto.sources/'port/saves').is_symlink())

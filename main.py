@@ -109,6 +109,18 @@ class Plugin:
     async def savehaven_event(self, app_id: str, event: str, name: str = ""):
         return self.service.automation.hook({"appId": app_id, "event": event, "name": name})
 
+    async def savehaven_action(self, data: dict):
+        return await asyncio.to_thread(self.service.automation.action, data)
+
+    async def savehaven_files(self):
+        return await asyncio.to_thread(self.service.sandbox.listing)
+
+    async def savehaven_file_action(self, data: dict):
+        result = await asyncio.to_thread(self.service.sandbox.action, data)
+        if data.get('action') in ('save', 'restore') and self.service.automation.settings['enabled']:
+            self.service.automation.enqueue([data['id']], 'web-file-edit')
+        return result
+
     async def savehaven_status(self):
         return await asyncio.to_thread(self.service.automation.status)
 
